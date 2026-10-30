@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    게임 분석 서버 템플릿. 이 프로젝트를 복제해 게임별 분석 서버를 만든다.
+    수신 서버의 내보내기 API에서 세션을 미러로 복사하고, 그 사본으로 게임별 통계를 계산한다.
+    공용 코어는 core 서브모듈(LogKit Core)을 참조한다.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LogServer</RootNamespace>
+    <AssemblyName>AnalyticsServer</AssemblyName>
+    <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 공용 코어는 core 서브모듈의 프로젝트로 참조하므로 이 프로젝트의 소스에서는 뺀다 -->
+    <Compile Remove="core/**" />
+    <Content Remove="core/**" />
+    <None Remove="core/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="core/LogKit.Core.csproj" />
+  </ItemGroup>
+
+</Project>

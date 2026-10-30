@@ -1,16 +1,14 @@
 namespace LogServer;
 
 /// <summary>
-/// GGGG 분석 서버 설정. appsettings.json에서 바인딩한다.
+/// 분석 서버 설정. appsettings.json에서 바인딩한다.
 /// DataPath는 수신 서버에서 복사해 온 미러 저장소이며, 원문(raw)은 가져오지 않으므로 KeepRawJsonl은 꺼 둔다.
+/// 게임별 설정(규약 파일 경로 등)은 각 게임 저장소에서 옵션 클래스를 더해 쓴다.
 /// </summary>
 public sealed class AnalyticsOptions : StorageOptions
 {
     /// <summary>분석 서버 자체의 X-Api-Key. 분석 페이지와 /api 호출이 이 값을 요구한다.</summary>
     public string ApiKey { get; set; } = "dev-log-key";
-
-    /// <summary>WeaponCode HMAC 무결성 키 문자열(기본 현재 값 유지로 클라이언트 호환).</summary>
-    public string WeaponCodeHmacKey { get; set; } = "WGG.weapon-code.v1.compact-integrity";
 
     /// <summary>복사해 올 수신 서버 주소(예: http://localhost:5000).</summary>
     public string IngestUrl { get; set; } = "http://localhost:5000";

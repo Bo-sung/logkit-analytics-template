@@ -8,7 +8,7 @@ namespace LogServer;
 /// <summary>
 /// 수신 서버의 내보내기 API에서 세션 로그를 주기적으로 복사해 분석 미러 저장소에 맞춘다.
 /// 목록의 updatedUtc가 미러 사본의 변경 시각과 다른 세션만 내려받고, 수신 서버에서 사라진 세션은 미러에서도 지운다.
-/// 미러 파일의 수정 시각을 수신 서버 시각으로 맞춰 두므로 분석 캐시도 변경분만 다시 계산한다.
+/// 미러 파일의 수정 시각을 수신 서버 시각으로 맞춰 두므로, 분석 쪽 캐시도 변경된 세션만 다시 계산하면 된다.
 /// </summary>
 public sealed class IngestMirror : BackgroundService
 {
@@ -17,7 +17,6 @@ public sealed class IngestMirror : BackgroundService
     private readonly AnalyticsOptions _options;
     private readonly CsvSessionStore _store;
     private readonly SessionSummary _summary;
-    private readonly GameAnalytics _analytics;
     private readonly ILogger<IngestMirror> _logger;
     private readonly HttpClient _http;
     private MirrorStatus _status = new();
@@ -30,13 +29,11 @@ public sealed class IngestMirror : BackgroundService
         AnalyticsOptions options,
         CsvSessionStore store,
         SessionSummary summary,
-        GameAnalytics analytics,
         ILogger<IngestMirror> logger)
     {
         _options = options;
         _store = store;
         _summary = summary;
-        _analytics = analytics;
         _logger = logger;
         _http = new HttpClient
         {
@@ -65,7 +62,7 @@ public sealed class IngestMirror : BackgroundService
     }
 
     /// <summary>
-    /// 한 번의 동기화를 실행하고 결과를 로그와 상태에 남긴다. 바뀐 것이 있으면 분석 캐시를 미리 채운다.
+    /// 한 번의 동기화를 실행하고 결과를 로그와 상태에 남긴다.
     /// stoppingToken을 입력으로 받으며, 예외는 로그로 남기고 삼킨다(종료 신호는 제외).
     /// </summary>
     private async Task RunOnceAsync(CancellationToken stoppingToken)
@@ -85,7 +82,6 @@ public sealed class IngestMirror : BackgroundService
             if (result.Updated > 0 || result.Removed > 0)
             {
                 _logger.LogInformation("미러 동기화: 세션 {Sessions}개, 갱신 {Updated}, 삭제 {Removed}", result.Sessions, result.Updated, result.Removed);
-                _analytics.Warm();
             }
         }
         catch (Exception e) when (!stoppingToken.IsCancellationRequested)
