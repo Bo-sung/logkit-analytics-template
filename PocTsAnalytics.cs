@@ -63,6 +63,52 @@ public sealed class PocTsAnalytics
     }
 
     /// <summary>
+    /// 선택한 버전·맵의 모든 판 위치 기록을 한 번에 돌려준다(이동 시뮬레이터가 여러 명을 같은 시간축으로 재생한다).
+    /// version·map이 비어 있으면 전체로 본다. 좌표는 소수 둘째 자리까지 줄여 응답을 작게 한다.
+    /// 버전과 맵 목록은 필터와 상관없이 전체 기준으로 돌려준다(선택 상자용).
+    /// </summary>
+    public PathsResponse Paths(string? version, string? map)
+    {
+        string root = _options.TelemetryPath;
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return new PathsResponse { Configured = false, TelemetryPath = root ?? string.Empty };
+        }
+
+        List<SessionDigest> all = Load(root);
+        List<SessionDigest> chosen = all
+            .Where(session => string.IsNullOrEmpty(version) || session.BuildVersion == version)
+            .Where(session => string.IsNullOrEmpty(map) || session.MapId == map)
+            .Where(session => session.Path.Count > 0)
+            .OrderByDescending(session => session.StartUtc, StringComparer.Ordinal)
+            .ToList();
+
+        return new PathsResponse
+        {
+            Configured = true,
+            TelemetryPath = root,
+            Version = version ?? string.Empty,
+            Map = map ?? string.Empty,
+            Versions = all.Select(session => session.BuildVersion).Distinct(StringComparer.Ordinal)
+                .OrderByDescending(name => name, Comparer<string>.Create(AppVersionOrder.Compare)).ToList(),
+            Maps = all.Select(session => session.MapId).Where(name => name.Length > 0).Distinct(StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal).ToList(),
+            Sessions = chosen.Select(session => new PathSession
+            {
+                SessionId = session.SessionId,
+                BuildVersion = session.BuildVersion,
+                MapId = session.MapId,
+                StartUtc = session.StartUtc,
+                PlaySeconds = Round(session.PlaySeconds),
+                EndReason = session.EndReason,
+                Points = session.Path.Select(point => new[] { Round2(point.T), Round2(point.X), Round2(point.Z) }).ToList(),
+            }).ToList(),
+        };
+    }
+
+    private static float Round2(float value) => (float)Math.Round(value, 2);
+
+    /// <summary>
     /// 이동 히트맵. version·map이 비어 있으면 그 조건은 전체로 본다.
     /// 판들의 플레이어 위치를 정사각형 격자(grid×grid)의 칸별 횟수로 바꿔 돌려준다. 행 0은 Z가 가장 작은 쪽이다.
     /// 맵마다 좌표계가 다르므로 화면은 맵을 골라서 보여 주는 것을 기본으로 한다.
@@ -476,6 +522,30 @@ public sealed class HeatmapResponse
 
 /// <summary>판 하나의 위치 기록. Points는 [게임 시간 T, X, Z] 순서의 배열 목록이다.</summary>
 public sealed class PathResponse
+{
+    public string SessionId { get; set; } = string.Empty;
+    public string BuildVersion { get; set; } = string.Empty;
+    public string MapId { get; set; } = string.Empty;
+    public string StartUtc { get; set; } = string.Empty;
+    public double PlaySeconds { get; set; }
+    public string EndReason { get; set; } = string.Empty;
+    public List<float[]> Points { get; set; } = new();
+}
+
+/// <summary>여러 판의 위치 기록 응답. 선택 상자용 전체 버전·맵 목록과 필터된 판 목록을 함께 준다.</summary>
+public sealed class PathsResponse
+{
+    public bool Configured { get; set; }
+    public string TelemetryPath { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public string Map { get; set; } = string.Empty;
+    public List<string> Versions { get; set; } = new();
+    public List<string> Maps { get; set; } = new();
+    public List<PathSession> Sessions { get; set; } = new();
+}
+
+/// <summary>판 한 개의 위치 기록. Points는 [게임 시간 T, X, Z] 목록이다.</summary>
+public sealed class PathSession
 {
     public string SessionId { get; set; } = string.Empty;
     public string BuildVersion { get; set; } = string.Empty;

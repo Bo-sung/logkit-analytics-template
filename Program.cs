@@ -39,6 +39,9 @@ public static class Program
         app.MapGet("/dashboard", () => Results.Redirect("/analytics"));
         app.MapGet("/api/mirror/status", (IngestMirror mirror) => Results.Json(mirror.Status, _jsonOptions));
         app.MapGet("/api/analytics/poc-ts", (PocTsAnalytics analytics) => Results.Json(analytics.Build(), _jsonOptions));
+        app.MapGet("/api/analytics/poc-ts/paths", (string? version, string? map, PocTsAnalytics analytics) =>
+            Results.Json(analytics.Paths(version, map), _jsonOptions));
+        app.MapGet("/simulator", () => Results.Content(SimulatorPage.Html.Replace("__GM_TOOL_URL__", options.GmToolUrl, StringComparison.Ordinal), "text/html; charset=utf-8"));
         app.MapGet("/api/analytics/poc-ts/path", (string? session, PocTsAnalytics analytics) =>
         {
             if (string.IsNullOrEmpty(session) || !CsvSessionStore.IsValidSessionId(session))
