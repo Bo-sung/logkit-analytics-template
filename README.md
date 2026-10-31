@@ -1,65 +1,65 @@
-# LogKit 분석 서버 템플릿
+# poc_ts 분석 서버 (KJG_6_B2_POC_TrenchSlot)
 
-LogKit 수신 서버(공통)에서 세션 로그를 주기적으로 복사해 미러에 쌓고, 그 사본으로 게임별 통계를 계산하는 분석 서버의 베이스다.
-게임마다 이 저장소를 복제해 그 게임의 분석기를 만든다.
+TrenchSlot POC의 게임 분석 대시보드다. 게임이 남긴 분석 JSONL(`Telemetry/<sessionId>.jsonl`)을 읽어 버전·웨이브·슬롯·상점·무기·피해 통계를 계산하고, `/dashboard`에서 보여 준다.
+LogKit 분석 서버 템플릿(GGGG 분석 서버 구조)을 바탕으로 만들었다.
+
+## 데이터 출처
+
+- **분석 JSONL(주 데이터)**: 게임의 `Application.persistentDataPath/Telemetry/`. 이 PC에서는 `C:\Users\JUNGLE\AppData\LocalLow\DefaultCompany\POC2\Telemetry`다. 서버가 이 폴더를 직접 읽는다.
+- **LogKit 수신 서버(`IngestUrl`)**: 같은 프로젝트의 콘솔·오류 로그 세션을 미러로 복사한다(`Project = poc_ts`). 대시보드 통계에는 쓰지 않는다.
+
+> 게임의 분석 파일은 LogKit 업로드 대상이 아니다(`Docs/LogKit-로그-적용.md`). 그래서 수신 서버에는 분석 이벤트가 올라오지 않는다. 서버에서 분석 데이터를 받으려면 게임이 Telemetry 파일을 업로드하도록 바꾸거나, 이 서버가 파일 폴더를 읽는 지금 방식을 쓴다.
 
 ## 구성
 
-- `Program.cs`: 진입점. 미러 동기화 서비스와 분석 API를 연결한다.
-- `IngestMirror.cs`: 수신 서버 내보내기 API(`/api/export/*`)를 주기적으로 읽어 세션을 미러로 복사한다. 게임과 무관하다.
-- `AnalyticsOptions.cs`: 설정(수신 서버 주소·키, 동기화 간격, 미러 경로).
-- `SampleAnalytics.cs`: 예제 분석기. 세션 요약 행만으로 앱 버전별 통계를 계산한다.
-- `core/`: 공용 코어(LogKit Core) 서브모듈. 세션 저장 형식, CSV 파서, 요약, 인증 미들웨어를 담는다.
+- `Program.cs`: 진입점. 미러 동기화, 분석 API, 대시보드를 연결한다.
+- `TelemetryReader.cs`: 판 JSONL 한 개를 읽어 `SessionDigest`로 줄인다. 웨이브는 summaryId별 최고 revision, 회전·구매·발사는 id별 마지막 값만 센다.
+- `PocTsAnalytics.cs`: 파일 캐시(크기·수정 시각 기준)와 버전별·전체 집계, 응답 모델.
+- `DashboardPage.cs`: 대시보드 HTML(한 파일, 데이터는 API에서 받는다).
+- `IngestMirror.cs`: 수신 서버의 `poc_ts` 세션을 미러에 맞춘다(`/api/mirror/status`).
+- `AnalyticsOptions.cs`: 설정. `core/`는 LogKit 공용 코어 서브모듈이다.
 
-## 저장소 받기
-
-```bash
-git clone --recurse-submodules <이 저장소 URL>
-# 이미 받은 경우
-git submodule update --init --recursive
-```
-
-## 새 게임 분석기 만들기
-
-1. 이 템플릿을 복제해 새 저장소를 만든다(예: `logkit-analytics-<게임명>`).
-2. `AnalyticsServer.csproj`의 `AssemblyName`을 게임에 맞게 바꾸고, 파일 이름도 맞춘다.
-3. `SampleAnalytics.cs`를 참고해 게임 분석 클래스를 추가한다. 세션 요약만으로 충분하면 `SessionSummary`의 행을 쓰고, 세부 로그가 필요하면 `CsvSessionStore.ReadSessionEntries`로 통합 CSV를 읽는다.
-4. 게임 규약 파일(이벤트 이름, 스테이지 목록 등)이 필요하면 `GameConfig/` 폴더에 JSON을 두고 csproj에 `CopyToOutputDirectory`를 건다.
-5. `Program.cs`에 게임별 엔드포인트를 등록한다. 그 API는 `ApiKeyAuth`가 `/api` 아래에서 인증한다.
-6. `appsettings.json`에서 `Urls`, `DataPath`, `IngestUrl`, `IngestApiKey`를 맞춘다.
-
-## 설정
+## 설정 (`appsettings.json`)
 
 | 키 | 기본값 | 설명 |
 | --- | --- | --- |
-| Urls | `http://0.0.0.0:5001` | 대기 주소 |
-| ApiKey | `dev-log-key` | 분석 API가 요구하는 키 |
-| IngestUrl | `http://localhost:5000` | 세션을 복사해 올 수신 서버 주소 |
-| IngestApiKey | `dev-log-key` | 수신 서버의 `ApiKey`와 같아야 한다 |
-| SyncIntervalSeconds | 60 | 수신 서버 세션 목록을 다시 확인하는 간격 |
-| IngestTimeoutSeconds | 120 | 수신 서버 요청 한 번의 제한 시간 |
-| DataPath | `data` | 미러 저장소. 이 서버만 쓴다. 수신 서버의 `data`와 같은 폴더로 두지 않는다 |
+| Urls | `http://0.0.0.0:5002` | 대기 주소. 5001은 GGGG 분석 서버가 쓰므로 피한다 |
+| ApiKey | `dev-log-key` | 대시보드와 `/api` 호출이 요구하는 키 |
+| TelemetryPath | (비움) | 분석 JSONL 폴더. 비우면 대시보드가 설정 안내만 보여 준다 |
+| IngestUrl | `http://localhost:5000` | 수신 서버 주소 |
+| IngestApiKey | `dev-log-key` | 수신 서버의 **열람 키**. 업로드 키나 관리 키를 넣지 않는다 |
+| Project | `poc_ts` | 수신 서버 `Projects`의 이름과 같아야 한다 |
+| SyncIntervalSeconds | 60 | 수신 서버 세션 목록 확인 간격 |
+| DataPath | `data` | 미러 저장소 |
 
-## 동기화 방식
+키 값은 저장소에 넣지 않는다. 운영 키는 환경 변수(`IngestApiKey`, `ApiKey`)로 덮어쓴다.
 
-- 기동 직후 한 번, 이후 `SyncIntervalSeconds`마다 `GET /api/export/index`로 수신 서버의 세션 목록(ID·`updatedUtc`)을 읽는다.
-- 미러에 없거나 변경 시각이 다른 세션만 통합 CSV·메타·지표를 내려받아 저장하고 월별 요약을 다시 계산한다.
-- 수신 서버에서 사라진 세션은 미러에서도 지운다.
-- 수신 서버가 꺼져 있으면 마지막 미러로 계속 응답한다. 상태는 `GET /api/mirror/status`에서 본다.
-
-## 엔드포인트(템플릿 기본)
+## 엔드포인트
 
 | 엔드포인트 | 인증 | 설명 |
 | --- | --- | --- |
+| `GET /dashboard` | 불필요 | 대시보드 페이지. API 키는 화면에서 입력받는다 |
+| `GET /api/analytics/poc-ts` | 필요 | 전체·버전별 집계, 판 목록 |
+| `GET /api/mirror/status` | 필요 | 수신 서버 미러 동기화 상태 |
 | `GET /health` | 불필요 | 생존 확인 |
-| `GET /api/mirror/status` | 필요 | 미러 동기화 상태 |
-| `GET /api/months` | 필요 | 미러의 월 목록과 월별 집계 |
-| `GET /api/analytics/versions?month=` | 필요 | 예제 분석: 앱 버전별 세션·로그·오류·정상 종료 비율 |
+
+## 집계 기준
+
+- **판**: `session_end.reason`별 종료 수, 사망 종료 비율, 도달 웨이브 평균, 판당 처치.
+- **웨이브**: 웨이브 번호별 진입(마감 기록 수), 완료율(`status=completed`), 사망 이탈, 평균 처치·클리어 시간.
+- **슬롯**: 회전 수, 판당 회전, 적중률(미스 아님), 니어미스 비율, 회전당 금전 변화.
+- **상점**: 구매 시도·성공률, 품목 종류별 건수와 지출(`actualSpent`), 실패 사유.
+- **무기**: 발사 수(`player_shot`), 명중률(명중한 발사 / 전체 발사), 처치, 헤드샷, 피해.
+- **피해**: 적 종류별 피격 수와 실제 피해량(`player_damage`).
 
 ## 실행
 
 ```bash
-dotnet run     # http://0.0.0.0:5001
+dotnet run        # http://0.0.0.0:5002/dashboard
 ```
 
-수신 서버(LogKit 저장소의 `server/`)가 떠 있어야 최신 세션을 받는다.
+요구사항: .NET 8 SDK. 수신 서버가 꺼져 있어도 분석은 로컬 폴더로 동작한다(미러는 마지막 상태로 응답).
+
+## 새 판 반영
+
+분석 폴더의 파일은 크기·수정 시각이 바뀔 때마다 다시 읽는다. 게임이 기록 중인 판도 새로고침하면 반영된다.
