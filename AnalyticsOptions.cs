@@ -23,12 +23,6 @@ public sealed class AnalyticsOptions : StorageOptions
     public string Project { get; set; } = "poc_ts";
 
     /// <summary>
-    /// 게임 분석 JSONL이 있는 폴더(Telemetry). 비우면 대시보드는 설정 안내만 보여 준다.
-    /// 게임의 분석 파일은 LogKit으로 업로드되지 않으므로 이 폴더를 직접 읽는다(예: %USERPROFILE%\AppData\LocalLow\DefaultCompany\POC2\Telemetry).
-    /// </summary>
-    public string TelemetryPath { get; set; } = string.Empty;
-
-    /// <summary>
     /// 페이지 머리글의 GM 툴 링크 주소. 브라우저가 열 수 있는 주소(사내망이면 172.21.10.67)로 맞춘다.
     /// </summary>
     public string GmToolUrl { get; set; } = "http://localhost:5000/dashboard";

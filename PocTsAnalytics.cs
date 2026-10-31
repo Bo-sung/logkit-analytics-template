@@ -6,45 +6,111 @@ namespace LogServer;
 /// </summary>
 public sealed class PocTsAnalytics
 {
-    private readonly AnalyticsOptions _options;
-    private readonly object _gate = new();
-    private readonly Dictionary<string, CachedFile> _files = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>게임이 분석 이벤트를 로그 수신 서버에 실을 때 쓰는 항목 분류.</summary>
+    private const string TELEMETRY_CATEGORY = "Telemetry";
 
-    /// <summary>설정(TelemetryPath)을 받아 분석기를 만든다. 파일은 Build를 부를 때 읽는다.</summary>
-    public PocTsAnalytics(AnalyticsOptions options)
+    private readonly CsvSessionStore _store;
+    private readonly SessionSummary _summary;
+    private readonly object _gate = new();
+    private readonly Dictionary<string, CachedFile> _files = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 로그 수신 서버 미러 저장소와 요약을 받아 분석기를 만든다. 분석 데이터는 로컬 파일이 아니라 미러의 세션에서 읽는다.
+    /// </summary>
+    public PocTsAnalytics(CsvSessionStore store, SessionSummary summary)
     {
-        _options = options;
+        _store = store;
+        _summary = summary;
     }
 
     /// <summary>
-    /// 폴더의 모든 판을 읽어 전체·버전별 통계와 판별 목록을 돌려준다.
-    /// 폴더가 없으면 Configured=false로 돌려주고, 화면이 설정 안내를 보여 준다.
+    /// 미러의 모든 판을 읽어 전체·버전별 통계와 판별 목록을 돌려준다.
+    /// 분석 이벤트가 없는 세션(콘솔 로그만 있는 세션)은 집계에서 뺀다.
     /// </summary>
     public PocTsResponse Build()
     {
-        string root = _options.TelemetryPath;
-        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-        {
-            return new PocTsResponse { Configured = false, TelemetryPath = root };
-        }
-
-        List<SessionDigest> sessions = Load(root);
-        return Aggregate(sessions, root);
+        List<SessionDigest> sessions = Load();
+        return Aggregate(sessions);
     }
 
     /// <summary>
-    /// 판 하나의 위치 기록(게임 시간·X·Z)을 돌려준다. 이동 시뮬레이터가 재생에 쓴다.
-    /// sessionId로 찾으며, 설정이 없거나 그 판이 없으면 null을 반환한다.
+    /// 미러 세션을 캐시와 맞춰 판 요약 목록으로 돌려준다. 세션 파일이 바뀌면 다시 읽고, 사라진 세션의 캐시는 지운다.
+    /// 캐시 접근은 한 번에 한 요청만 하도록 잠근다.
     /// </summary>
-    public PathResponse? Path(string sessionId)
+    private List<SessionDigest> Load()
     {
-        string root = _options.TelemetryPath;
-        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        lock (_gate)
+        {
+            List<SessionDigest> sessions = new();
+            HashSet<string> present = new(StringComparer.Ordinal);
+            foreach (MonthInfo month in _summary.ListMonths())
+            {
+                foreach (SessionRow row in _summary.GetMonthSessions(month.Month))
+                {
+                    string csv = _store.SessionCsvPath(row.SessionId);
+                    if (!File.Exists(csv))
+                    {
+                        continue;
+                    }
+
+                    present.Add(row.SessionId);
+                    FileInfo info = new(csv);
+                    if (!_files.TryGetValue(row.SessionId, out CachedFile? cached) || cached.Length != info.Length || cached.Written != info.LastWriteTimeUtc)
+                    {
+                        cached = new CachedFile(info.Length, info.LastWriteTimeUtc, ReadDigest(row.SessionId));
+                        _files[row.SessionId] = cached;
+                    }
+
+                    if (cached.Digest is not null)
+                    {
+                        sessions.Add(cached.Digest);
+                    }
+                }
+            }
+
+            foreach (string gone in _files.Keys.Where(key => !present.Contains(key)).ToList())
+            {
+                _files.Remove(gone);
+            }
+
+            return sessions;
+        }
+    }
+
+    /// <summary>
+    /// 세션의 Telemetry 항목 dataJson을 이벤트 줄로 모아 판 요약을 만든다. 분석 이벤트가 없으면 null이다.
+    /// sessionId를 입력으로 사용하며 미러 CSV를 한 번 읽는다.
+    /// </summary>
+    private SessionDigest? ReadDigest(string sessionId)
+    {
+        List<LogEntry>? entries = _store.ReadSessionEntries(sessionId);
+        if (entries is null)
         {
             return null;
         }
 
-        SessionDigest? session = Load(root).FirstOrDefault(entry => entry.SessionId == sessionId);
+        List<string> lines = entries
+            .Where(entry => entry.Category == TELEMETRY_CATEGORY && entry.DataJson.Length > 0)
+            .Select(entry => entry.DataJson)
+            .ToList();
+        if (lines.Count == 0)
+        {
+            return null;
+        }
+
+        // 판의 식별자는 수신 서버 세션 ID다(이벤트 줄 안의 sessionId는 게임이 남긴 원래 값이라 쓰지 않는다).
+        SessionDigest digest = TelemetryReader.ReadLines(lines);
+        digest.SessionId = sessionId;
+        return digest;
+    }
+
+    /// <summary>
+    /// 판 하나의 위치 기록(게임 시간·X·Z)을 돌려준다. 이동 시뮬레이터가 재생에 쓴다.
+    /// sessionId로 찾으며, 그 판이 없으면 null을 반환한다.
+    /// </summary>
+    public PathResponse? Path(string sessionId)
+    {
+        SessionDigest? session = Load().FirstOrDefault(entry => entry.SessionId == sessionId);
         if (session is null)
         {
             return null;
@@ -69,13 +135,7 @@ public sealed class PocTsAnalytics
     /// </summary>
     public PathsResponse Paths(string? version, string? map)
     {
-        string root = _options.TelemetryPath;
-        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-        {
-            return new PathsResponse { Configured = false, TelemetryPath = root ?? string.Empty };
-        }
-
-        List<SessionDigest> all = Load(root);
+        List<SessionDigest> all = Load();
         List<SessionDigest> chosen = all
             .Where(session => string.IsNullOrEmpty(version) || session.BuildVersion == version)
             .Where(session => string.IsNullOrEmpty(map) || session.MapId == map)
@@ -86,7 +146,6 @@ public sealed class PocTsAnalytics
         return new PathsResponse
         {
             Configured = true,
-            TelemetryPath = root,
             Version = version ?? string.Empty,
             Map = map ?? string.Empty,
             Versions = all.Select(session => session.BuildVersion).Distinct(StringComparer.Ordinal)
@@ -115,13 +174,7 @@ public sealed class PocTsAnalytics
     /// </summary>
     public HeatmapResponse Heatmap(string? version, string? map, int grid)
     {
-        string root = _options.TelemetryPath;
-        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
-        {
-            return new HeatmapResponse { Configured = false, TelemetryPath = root ?? string.Empty };
-        }
-
-        List<SessionDigest> all = Load(root);
+        List<SessionDigest> all = Load();
         List<SessionDigest> chosen = all
             .Where(session => string.IsNullOrEmpty(version) || session.BuildVersion == version)
             .Where(session => string.IsNullOrEmpty(map) || session.MapId == map)
@@ -131,7 +184,6 @@ public sealed class PocTsAnalytics
         HeatmapResponse response = new()
         {
             Configured = true,
-            TelemetryPath = root,
             Version = version ?? string.Empty,
             Map = map ?? string.Empty,
             Grid = grid,
@@ -173,42 +225,10 @@ public sealed class PocTsAnalytics
     }
 
     /// <summary>
-    /// 폴더의 *.jsonl을 캐시와 맞춰 판 요약 목록으로 돌려준다. 사라진 파일의 캐시는 지운다.
-    /// root는 텔레메트리 폴더 경로이며, 캐시 접근은 한 번에 한 요청만 하도록 잠근다.
-    /// </summary>
-    private List<SessionDigest> Load(string root)
-    {
-        lock (_gate)
-        {
-            List<SessionDigest> sessions = new();
-            HashSet<string> present = new(StringComparer.OrdinalIgnoreCase);
-            foreach (string path in Directory.EnumerateFiles(root, "*.jsonl"))
-            {
-                FileInfo info = new(path);
-                present.Add(path);
-                if (!_files.TryGetValue(path, out CachedFile? cached) || cached.Length != info.Length || cached.Written != info.LastWriteTimeUtc)
-                {
-                    cached = new CachedFile(info.Length, info.LastWriteTimeUtc, TelemetryReader.Read(path));
-                    _files[path] = cached;
-                }
-
-                sessions.Add(cached.Digest);
-            }
-
-            foreach (string gone in _files.Keys.Where(key => !present.Contains(key)).ToList())
-            {
-                _files.Remove(gone);
-            }
-
-            return sessions;
-        }
-    }
-
-    /// <summary>
     /// 판 요약 목록을 버전별로 묶어 집계한다. 버전은 AppVersionOrder 순(최신 먼저)이다.
     /// sessions는 빈 목록일 수 있고, root는 응답에 그대로 싣는다.
     /// </summary>
-    private static PocTsResponse Aggregate(List<SessionDigest> sessions, string root)
+    private static PocTsResponse Aggregate(List<SessionDigest> sessions)
     {
         List<VersionStats> versions = sessions
             .GroupBy(session => session.BuildVersion, StringComparer.Ordinal)
@@ -219,7 +239,6 @@ public sealed class PocTsAnalytics
         return new PocTsResponse
         {
             Configured = true,
-            TelemetryPath = root,
             SessionCount = sessions.Count,
             Total = sessions.Count == 0 ? null : Summarize("전체", sessions),
             Versions = versions,
@@ -387,14 +406,13 @@ public sealed class PocTsAnalytics
     private static double Round(double value, int digits = 2) => Math.Round(value, digits);
 
     /// <summary>캐시에 보관하는 파일 한 개의 요약과 그 파일의 크기·수정 시각.</summary>
-    private sealed record CachedFile(long Length, DateTime Written, SessionDigest Digest);
+    private sealed record CachedFile(long Length, DateTime Written, SessionDigest? Digest);
 }
 
-/// <summary>분석 응답. Configured=false면 TelemetryPath 설정이 없거나 폴더가 없다.</summary>
+/// <summary>분석 응답. 수신 서버 미러의 세션을 집계한 결과다.</summary>
 public sealed class PocTsResponse
 {
     public bool Configured { get; set; }
-    public string TelemetryPath { get; set; } = string.Empty;
     public int SessionCount { get; set; }
     public VersionStats? Total { get; set; }
     public List<VersionStats> Versions { get; set; } = new();
@@ -506,7 +524,6 @@ public sealed class PocSessionRow
 public sealed class HeatmapResponse
 {
     public bool Configured { get; set; }
-    public string TelemetryPath { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public string Map { get; set; } = string.Empty;
     public List<string> Maps { get; set; } = new();
@@ -536,7 +553,6 @@ public sealed class PathResponse
 public sealed class PathsResponse
 {
     public bool Configured { get; set; }
-    public string TelemetryPath { get; set; } = string.Empty;
     public string Version { get; set; } = string.Empty;
     public string Map { get; set; } = string.Empty;
     public List<string> Versions { get; set; } = new();

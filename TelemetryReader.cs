@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace LogServer;
 
 /// <summary>
-/// 한 판의 분석 JSONL(Telemetry/&lt;sessionId&gt;.jsonl)에서 집계에 필요한 값만 남긴 요약.
+/// 한 판의 분석 이벤트 줄(로그 수신 서버에 올라온 Telemetry 항목의 dataJson)에서 집계에 필요한 값만 남긴 요약.
 /// 원문 줄은 들고 있지 않으며, 파일이 바뀌지 않는 한 한 번만 파싱한다.
 /// </summary>
 public sealed class SessionDigest
@@ -56,10 +56,10 @@ public static class TelemetryReader
     private const double PATH_SAMPLE_SECONDS = 0.5;
 
     /// <summary>
-    /// 파일 하나를 읽어 한 판의 요약을 돌려준다.
-    /// path는 JSONL 파일 경로이며, 파일이 없으면 예외가 난다. 호출하는 쪽이 존재를 확인한다.
+    /// 한 판의 이벤트 줄 목록을 읽어 요약을 돌려준다. 줄은 게임이 남긴 분석 이벤트 JSON 한 개씩이다.
+    /// lines는 로그 수신 서버 세션의 Telemetry 항목 dataJson 목록이며, 해석할 수 없는 줄은 건너뛴다.
     /// </summary>
-    public static SessionDigest Read(string path)
+    public static SessionDigest ReadLines(IEnumerable<string> lines)
     {
         SessionDigest digest = new();
         Dictionary<string, (int Revision, WaveDigest Wave)> waves = new(StringComparer.Ordinal);
@@ -70,10 +70,7 @@ public static class TelemetryReader
         double lastElapsed = 0;
         double lastPathSample = double.NegativeInfinity;
 
-        using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1 << 16);
-        using StreamReader reader = new(stream);
-        string? line;
-        while ((line = reader.ReadLine()) is not null)
+        foreach (string line in lines)
         {
             if (line.Length == 0)
             {
