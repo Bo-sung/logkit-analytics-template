@@ -39,6 +39,8 @@ public static class Program
         app.MapGet("/dashboard", () => Results.Redirect("/analytics"));
         app.MapGet("/api/mirror/status", (IngestMirror mirror) => Results.Json(mirror.Status, _jsonOptions));
         app.MapGet("/api/analytics/poc-ts", (PocTsAnalytics analytics) => Results.Json(analytics.Build(), _jsonOptions));
+        app.MapGet("/api/analytics/poc-ts/heatmap", (string? version, string? map, int? grid, PocTsAnalytics analytics) =>
+            Results.Json(analytics.Heatmap(version, map, Math.Clamp(grid ?? 64, 8, 200)), _jsonOptions));
 
         app.Services.GetRequiredService<CsvSessionStore>().EnsureDirectories();
         app.Run();

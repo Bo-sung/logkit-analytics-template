@@ -22,7 +22,13 @@ public sealed class SessionDigest
     public List<PurchaseDigest> Purchases { get; set; } = new();
     public List<ShotDigest> Shots { get; set; } = new();
     public List<DamageDigest> DamageTaken { get; set; } = new();
+
+    /// <summary>플레이어 위치 표본(0.5초 간격). 이동 히트맵에 쓴다.</summary>
+    public List<PathPoint> Path { get; set; } = new();
 }
+
+/// <summary>플레이어 위치 한 점(월드 X·Z).</summary>
+public readonly record struct PathPoint(float X, float Z);
 
 /// <summary>웨이브 한 번의 마감 요약(summaryId당 최고 revision 하나).</summary>
 public sealed record WaveDigest(int Wave, string Status, string Reason, int Kills, double? ClearSeconds);
@@ -46,6 +52,9 @@ public sealed record DamageDigest(string EnemyType, double Damage);
 /// </summary>
 public static class TelemetryReader
 {
+    /// <summary>위치 표본 간격(게임 초). 플레이어 위치는 초당 50회라 그대로 모으면 너무 크다.</summary>
+    private const double PATH_SAMPLE_SECONDS = 0.5;
+
     /// <summary>
     /// 파일 하나를 읽어 한 판의 요약을 돌려준다.
     /// path는 JSONL 파일 경로이며, 파일이 없으면 예외가 난다. 호출하는 쪽이 존재를 확인한다.
@@ -59,6 +68,7 @@ public static class TelemetryReader
         Dictionary<string, ShotAccumulator> shots = new(StringComparer.Ordinal);
         bool ended = false;
         double lastElapsed = 0;
+        double lastPathSample = double.NegativeInfinity;
 
         using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 1 << 16);
         using StreamReader reader = new(stream);
@@ -168,6 +178,19 @@ public static class TelemetryReader
                         }
 
                         shot.Damage += Num(impact, "actualDamage") ?? 0;
+                    }
+
+                    break;
+                }
+                case "player_position":
+                {
+                    JsonElement player = Obj(payload, "player");
+                    double? x = Num(player, "x");
+                    double? z = Num(player, "z");
+                    if (x is double px && z is double pz && lastElapsed - lastPathSample >= PATH_SAMPLE_SECONDS)
+                    {
+                        digest.Path.Add(new PathPoint((float)px, (float)pz));
+                        lastPathSample = lastElapsed;
                     }
 
                     break;

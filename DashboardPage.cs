@@ -86,6 +86,15 @@ public static class DashboardPage
     <div id="t-shop"></div>
   </section>
 
+  <div class="section">위치</div>
+  <section class="card wide">
+    <h3>이동 히트맵</h3>
+    <p class="sub">플레이어 위치를 0.5초 간격으로 모아 칸별 머문 횟수를 색으로 나타냅니다(진할수록 많이 머묾). 맵마다 좌표계가 달라서 맵을 골라서 보세요. 위쪽이 Z가 큰 쪽입니다.</p>
+    <div class="row"><select id="hmap" style="min-width:200px"></select></div>
+    <div id="hm-info" class="sub"></div>
+    <div style="margin-top:8px"><canvas id="hm-canvas" width="560" height="560" style="max-width:100%;background:#0b0f16;border-radius:8px"></canvas></div>
+  </section>
+
   <div class="section">판</div>
   <section class="card wide">
     <h3>판 목록</h3>
@@ -288,6 +297,45 @@ function renderVersionSelect() {
   select.value = keep;
 }
 
+// 이동 히트맵: 버전 선택과 맵 선택으로 서버에서 칸별 횟수를 받아 캔버스에 그린다.
+const HEATMAP_GRID = 64;
+async function loadHeatmap() {
+  if (!DATA || !DATA.configured) return;
+  const version = $("ver").value === ALL ? "" : $("ver").value;
+  const p = new URLSearchParams({ grid: String(HEATMAP_GRID) });
+  if (version) p.set("version", version);
+  if ($("hmap").value) p.set("map", $("hmap").value);
+  const data = await api(ENDPOINT + "/heatmap?" + p);
+  const sel = $("hmap");
+  const previous = sel.value;
+  sel.innerHTML = '<option value="">전체 맵 (좌표계가 섞임)</option>' + data.maps.map((m) => '<option value="' + esc(m) + '">' + esc(m) + "</option>").join("");
+  sel.value = data.maps.includes(previous) ? previous : "";
+  drawHeatmap(data);
+}
+
+function drawHeatmap(d) {
+  const c = $("hm-canvas");
+  const g = c.getContext("2d");
+  const W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  if (!d.pointCount) {
+    $("hm-info").textContent = "표시할 위치 데이터가 없습니다. 선택한 버전·맵의 판에 위치 기록이 있는지 확인하세요.";
+    return;
+  }
+  const mixed = !$("hmap").value && d.maps.length > 1 ? " · 맵이 여러 개라 좌표가 섞였습니다" : "";
+  $("hm-info").textContent = "판 " + num(d.sessionCount, 0) + "개 · 위치 " + num(d.pointCount, 0) + "개 · 최대 " + num(d.maxCount, 0) + "회/칸" + mixed;
+  const n = d.grid, cell = W / n, max = d.maxCount;
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < n; col++) {
+      const k = d.counts[row * n + col];
+      if (!k) continue;
+      const t = Math.sqrt(k / max);
+      g.fillStyle = "rgba(255," + Math.round(200 * (1 - t)) + "," + Math.round(60 * (1 - t)) + "," + (0.15 + 0.85 * t).toFixed(3) + ")";
+      g.fillRect(col * cell, (n - 1 - row) * cell, cell, cell);
+    }
+  }
+}
+
 function render() {
   if (!DATA.configured) {
     $("notice").hidden = false;
@@ -307,6 +355,7 @@ function render() {
   renderSlot(v);
   renderShop(v);
   renderSessions(v);
+  loadHeatmap().catch((e) => { $("hm-info").textContent = e.message; });
 }
 
 async function load() {
@@ -325,6 +374,7 @@ async function load() {
 $("key").value = getKey();
 $("load").addEventListener("click", load);
 $("ver").addEventListener("change", () => { if (DATA) render(); });
+$("hmap").addEventListener("change", () => { loadHeatmap().catch((e) => { $("hm-info").textContent = e.message; }); });
 $("key").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
 if (getKey()) load(); else setStatus("API 키를 입력하세요");
 </script>

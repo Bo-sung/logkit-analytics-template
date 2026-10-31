@@ -33,6 +33,70 @@ public sealed class PocTsAnalytics
     }
 
     /// <summary>
+    /// 이동 히트맵. version·map이 비어 있으면 그 조건은 전체로 본다.
+    /// 판들의 플레이어 위치를 정사각형 격자(grid×grid)의 칸별 횟수로 바꿔 돌려준다. 행 0은 Z가 가장 작은 쪽이다.
+    /// 맵마다 좌표계가 다르므로 화면은 맵을 골라서 보여 주는 것을 기본으로 한다.
+    /// </summary>
+    public HeatmapResponse Heatmap(string? version, string? map, int grid)
+    {
+        string root = _options.TelemetryPath;
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return new HeatmapResponse { Configured = false, TelemetryPath = root ?? string.Empty };
+        }
+
+        List<SessionDigest> all = Load(root);
+        List<SessionDigest> chosen = all
+            .Where(session => string.IsNullOrEmpty(version) || session.BuildVersion == version)
+            .Where(session => string.IsNullOrEmpty(map) || session.MapId == map)
+            .ToList();
+        List<PathPoint> points = chosen.SelectMany(session => session.Path).ToList();
+
+        HeatmapResponse response = new()
+        {
+            Configured = true,
+            TelemetryPath = root,
+            Version = version ?? string.Empty,
+            Map = map ?? string.Empty,
+            Grid = grid,
+            Maps = all.Select(session => session.MapId).Where(name => name.Length > 0).Distinct(StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal).ToList(),
+            SessionCount = chosen.Count,
+            PointCount = points.Count,
+        };
+        if (points.Count == 0)
+        {
+            return response;
+        }
+
+        float minX = points.Min(point => point.X);
+        float maxX = points.Max(point => point.X);
+        float minZ = points.Min(point => point.Z);
+        float maxZ = points.Max(point => point.Z);
+        float centerX = (minX + maxX) / 2;
+        float centerZ = (minZ + maxZ) / 2;
+        float half = Math.Max(maxX - minX, maxZ - minZ) / 2 * 1.04f + 0.5f;
+        response.OriginX = centerX - half;
+        response.OriginZ = centerZ - half;
+        response.Side = half * 2;
+
+        int[] counts = new int[grid * grid];
+        int max = 0;
+        foreach (PathPoint point in points)
+        {
+            int col = Math.Clamp((int)((point.X - response.OriginX) / response.Side * grid), 0, grid - 1);
+            int row = Math.Clamp((int)((point.Z - response.OriginZ) / response.Side * grid), 0, grid - 1);
+            int index = row * grid + col;
+            counts[index]++;
+            max = Math.Max(max, counts[index]);
+        }
+
+        response.Counts = counts;
+        response.MaxCount = max;
+        return response;
+    }
+
+    /// <summary>
     /// 폴더의 *.jsonl을 캐시와 맞춰 판 요약 목록으로 돌려준다. 사라진 파일의 캐시는 지운다.
     /// root는 텔레메트리 폴더 경로이며, 캐시 접근은 한 번에 한 요청만 하도록 잠근다.
     /// </summary>
@@ -360,4 +424,22 @@ public sealed class PocSessionRow
     public int Spins { get; set; }
     public int Purchases { get; set; }
     public int Shots { get; set; }
+}
+
+/// <summary>이동 히트맵 응답. Counts는 행×Grid+열 순서이며 행 0(Z 최소)부터 채운다.</summary>
+public sealed class HeatmapResponse
+{
+    public bool Configured { get; set; }
+    public string TelemetryPath { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public string Map { get; set; } = string.Empty;
+    public List<string> Maps { get; set; } = new();
+    public int Grid { get; set; }
+    public int SessionCount { get; set; }
+    public int PointCount { get; set; }
+    public float OriginX { get; set; }
+    public float OriginZ { get; set; }
+    public float Side { get; set; }
+    public int MaxCount { get; set; }
+    public int[] Counts { get; set; } = Array.Empty<int>();
 }
