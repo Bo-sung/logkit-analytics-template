@@ -33,6 +33,36 @@ public sealed class PocTsAnalytics
     }
 
     /// <summary>
+    /// 판 하나의 위치 기록(게임 시간·X·Z)을 돌려준다. 이동 시뮬레이터가 재생에 쓴다.
+    /// sessionId로 찾으며, 설정이 없거나 그 판이 없으면 null을 반환한다.
+    /// </summary>
+    public PathResponse? Path(string sessionId)
+    {
+        string root = _options.TelemetryPath;
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return null;
+        }
+
+        SessionDigest? session = Load(root).FirstOrDefault(entry => entry.SessionId == sessionId);
+        if (session is null)
+        {
+            return null;
+        }
+
+        return new PathResponse
+        {
+            SessionId = session.SessionId,
+            BuildVersion = session.BuildVersion,
+            MapId = session.MapId,
+            StartUtc = session.StartUtc,
+            PlaySeconds = Round(session.PlaySeconds),
+            EndReason = session.EndReason,
+            Points = session.Path.Select(point => new[] { point.T, point.X, point.Z }).ToList(),
+        };
+    }
+
+    /// <summary>
     /// 이동 히트맵. version·map이 비어 있으면 그 조건은 전체로 본다.
     /// 판들의 플레이어 위치를 정사각형 격자(grid×grid)의 칸별 횟수로 바꿔 돌려준다. 행 0은 Z가 가장 작은 쪽이다.
     /// 맵마다 좌표계가 다르므로 화면은 맵을 골라서 보여 주는 것을 기본으로 한다.
@@ -442,4 +472,16 @@ public sealed class HeatmapResponse
     public float Side { get; set; }
     public int MaxCount { get; set; }
     public int[] Counts { get; set; } = Array.Empty<int>();
+}
+
+/// <summary>판 하나의 위치 기록. Points는 [게임 시간 T, X, Z] 순서의 배열 목록이다.</summary>
+public sealed class PathResponse
+{
+    public string SessionId { get; set; } = string.Empty;
+    public string BuildVersion { get; set; } = string.Empty;
+    public string MapId { get; set; } = string.Empty;
+    public string StartUtc { get; set; } = string.Empty;
+    public double PlaySeconds { get; set; }
+    public string EndReason { get; set; } = string.Empty;
+    public List<float[]> Points { get; set; } = new();
 }

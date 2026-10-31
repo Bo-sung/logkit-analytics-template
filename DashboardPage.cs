@@ -95,6 +95,21 @@ public static class DashboardPage
     <div style="margin-top:8px"><canvas id="hm-canvas" width="560" height="560" style="max-width:100%;background:#0b0f16;border-radius:8px"></canvas></div>
   </section>
 
+  <section class="card wide">
+    <h3>이동 시뮬레이터</h3>
+    <p class="sub">한 판의 플레이어 이동을 게임 시간 기준으로 다시 재생합니다. 0.5초 간격 기록 사이는 직선으로 이어 그립니다. 주황 선은 꼬리(최근 이동)입니다.</p>
+    <div class="row">
+      <select id="sim-session" style="min-width:340px"></select>
+      <button id="sim-play" type="button">▶ 재생</button>
+      <select id="sim-speed"></select>
+      <select id="sim-trail"></select>
+      <span id="sim-clock" class="muted">0:00.0 / 0:00.0</span>
+    </div>
+    <input id="sim-seek" type="range" min="0" max="1" step="0.1" value="0" style="width:100%;margin-top:8px">
+    <div id="sim-info" class="sub"></div>
+    <div style="margin-top:8px"><canvas id="sim-canvas" width="560" height="560" style="max-width:100%;background:#0b0f16;border-radius:8px"></canvas></div>
+  </section>
+
   <div class="section">판</div>
   <section class="card wide">
     <h3>판 목록</h3>
@@ -336,6 +351,140 @@ function drawHeatmap(d) {
   }
 }
 
+// 이동 시뮬레이터: 판 하나의 위치 기록을 받아 게임 시간 기준으로 재생한다(GGGG 리플레이와 같은 재생 방식).
+const SIM = { points: [], maxT: 0, t: 0, playing: false, last: 0, sessionId: "" };
+const SIM_TRAIL_OPTIONS = [["5", "꼬리 5초"], ["15", "꼬리 15초"], ["30", "꼬리 30초"], ["0", "전체 경로"]];
+
+function simFillSessions() {
+  const sel = $("sim-session");
+  const previous = sel.value;
+  const version = $("ver").value === ALL ? "" : $("ver").value;
+  const list = DATA.sessions.filter((s) => !version || s.buildVersion === version);
+  sel.innerHTML = list.length
+    ? list.map((s) => '<option value="' + esc(s.sessionId) + '">' + esc((s.startUtc || "").replace("T", " ").slice(0, 19)) + " · " + esc(s.mapId || "맵 없음") + " · " + esc(dur(s.playSeconds)) + " · " + esc(s.endReason) + "</option>").join("")
+    : '<option value="">해당 버전에 판이 없습니다</option>';
+  sel.value = list.some((s) => s.sessionId === previous) ? previous : (list[0] ? list[0].sessionId : "");
+}
+
+async function simLoad() {
+  const id = $("sim-session").value;
+  if (!id) { SIM.points = []; simDraw(); return; }
+  const data = await api(ENDPOINT + "/path?session=" + encodeURIComponent(id));
+  SIM.sessionId = id;
+  SIM.points = data.points;
+  SIM.maxT = data.points.length ? data.points[data.points.length - 1][0] : 0;
+  SIM.t = 0;
+  SIM.playing = false;
+  $("sim-play").textContent = "▶ 재생";
+  $("sim-seek").max = String(SIM.maxT || 1);
+  $("sim-seek").value = "0";
+  $("sim-info").textContent = data.points.length
+    ? "위치 " + num(data.points.length, 0) + "개 · " + (data.mapId || "맵 없음") + " · " + (data.endReason || "")
+    : "이 판에는 위치 기록이 없습니다.";
+  simDraw();
+}
+
+// 두 기록 사이는 선형으로 보간한다. t는 게임 시간(초).
+function simPosAt(t) {
+  const pts = SIM.points;
+  if (!pts.length) return null;
+  if (t <= pts[0][0]) return pts[0];
+  if (t >= pts[pts.length - 1][0]) return pts[pts.length - 1];
+  let lo = 0, hi = pts.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (pts[mid][0] <= t) lo = mid; else hi = mid; }
+  const a = pts[lo], b = pts[hi];
+  const k = (t - a[0]) / ((b[0] - a[0]) || 1);
+  return [t, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+}
+
+function simDraw() {
+  const c = $("sim-canvas");
+  const g = c.getContext("2d");
+  const W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = "rgba(255,255,255,0.07)";
+  g.lineWidth = 1;
+  for (let k = 1; k < 4; k++) { const p = Math.round(W * k / 4) + 0.5; g.beginPath(); g.moveTo(p, 0); g.lineTo(p, H); g.moveTo(0, p); g.lineTo(W, p); g.stroke(); }
+  $("sim-clock").textContent = simTime(SIM.t) + " / " + simTime(SIM.maxT);
+  const pts = SIM.points;
+  if (!pts.length) return;
+
+  // 판 전체 범위를 정사각형으로 맞춰 화면에 담는다(위쪽이 Z가 큰 쪽).
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const p of pts) { minX = Math.min(minX, p[1]); maxX = Math.max(maxX, p[1]); minZ = Math.min(minZ, p[2]); maxZ = Math.max(maxZ, p[2]); }
+  const half = Math.max(maxX - minX, maxZ - minZ, 1) / 2 * 1.08;
+  const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+  const toX = (x) => (x - (cx - half)) / (2 * half) * W;
+  const toY = (z) => H - (z - (cz - half)) / (2 * half) * H;
+
+  // 전체 동선 바탕(흐리게)
+  g.strokeStyle = "rgba(120,160,255,0.18)";
+  g.beginPath();
+  pts.forEach((p, i) => { if (i === 0) g.moveTo(toX(p[1]), toY(p[2])); else g.lineTo(toX(p[1]), toY(p[2])); });
+  g.stroke();
+
+  // 꼬리: 현재 시각 기준 최근 구간을 진하게
+  const trail = Number($("sim-trail").value);
+  const from = trail > 0 ? SIM.t - trail : -Infinity;
+  const now = simPosAt(SIM.t);
+  g.strokeStyle = "rgba(255,200,60,0.9)";
+  g.lineWidth = 3;
+  g.beginPath();
+  let started = false;
+  for (const p of pts) {
+    if (p[0] < from) continue;
+    if (p[0] > SIM.t) break;
+    if (!started) { g.moveTo(toX(p[1]), toY(p[2])); started = true; } else g.lineTo(toX(p[1]), toY(p[2]));
+  }
+  if (started && now) g.lineTo(toX(now[1]), toY(now[2]));
+  g.stroke();
+
+  // 현재 위치
+  if (now) {
+    g.fillStyle = "#ff5a5a";
+    g.beginPath();
+    g.arc(toX(now[1]), toY(now[2]), 7, 0, Math.PI * 2);
+    g.fill();
+  }
+}
+
+function simTime(sec) {
+  const s = Math.max(0, sec || 0);
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return m + ":" + (r < 10 ? "0" : "") + r.toFixed(1);
+}
+
+function simTick(now) {
+  if (!SIM.playing) return;
+  const dt = (now - SIM.last) / 1000;
+  SIM.last = now;
+  SIM.t = Math.min(SIM.maxT, SIM.t + dt * Number($("sim-speed").value));
+  $("sim-seek").value = String(SIM.t);
+  simDraw();
+  if (SIM.t >= SIM.maxT) { simSetPlaying(false); return; }
+  requestAnimationFrame(simTick);
+}
+
+function simSetPlaying(on) {
+  SIM.playing = on;
+  $("sim-play").textContent = on ? "❚❚ 정지" : "▶ 재생";
+  if (on && SIM.points.length) {
+    if (SIM.t >= SIM.maxT) SIM.t = 0;
+    SIM.last = performance.now();
+    requestAnimationFrame(simTick);
+  }
+}
+
+function simInit() {
+  $("sim-speed").innerHTML = [1, 2, 4, 8, 16].map((n) => '<option value="' + n + '"' + (n === 4 ? " selected" : "") + ">" + n + "배속</option>").join("");
+  $("sim-trail").innerHTML = SIM_TRAIL_OPTIONS.map(([v, label]) => '<option value="' + v + '">' + label + "</option>").join("");
+  $("sim-trail").value = "15";
+  $("sim-play").onclick = () => simSetPlaying(!SIM.playing);
+  $("sim-seek").oninput = () => { SIM.t = Number($("sim-seek").value); simDraw(); };
+  $("sim-session").onchange = () => simLoad().catch((e) => { $("sim-info").textContent = e.message; });
+  $("sim-trail").onchange = simDraw;
+}
+
 function render() {
   if (!DATA.configured) {
     $("notice").hidden = false;
@@ -356,6 +505,8 @@ function render() {
   renderShop(v);
   renderSessions(v);
   loadHeatmap().catch((e) => { $("hm-info").textContent = e.message; });
+  simFillSessions();
+  simLoad().catch((e) => { $("sim-info").textContent = e.message; });
 }
 
 async function load() {
@@ -374,6 +525,7 @@ async function load() {
 $("key").value = getKey();
 $("load").addEventListener("click", load);
 $("ver").addEventListener("change", () => { if (DATA) render(); });
+simInit();
 $("hmap").addEventListener("change", () => { loadHeatmap().catch((e) => { $("hm-info").textContent = e.message; }); });
 $("key").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
 if (getKey()) load(); else setStatus("API 키를 입력하세요");

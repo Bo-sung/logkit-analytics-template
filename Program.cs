@@ -39,6 +39,16 @@ public static class Program
         app.MapGet("/dashboard", () => Results.Redirect("/analytics"));
         app.MapGet("/api/mirror/status", (IngestMirror mirror) => Results.Json(mirror.Status, _jsonOptions));
         app.MapGet("/api/analytics/poc-ts", (PocTsAnalytics analytics) => Results.Json(analytics.Build(), _jsonOptions));
+        app.MapGet("/api/analytics/poc-ts/path", (string? session, PocTsAnalytics analytics) =>
+        {
+            if (string.IsNullOrEmpty(session) || !CsvSessionStore.IsValidSessionId(session))
+            {
+                return Results.BadRequest(new { error = "session 값이 필요합니다" });
+            }
+
+            PathResponse? path = analytics.Path(session);
+            return path is null ? Results.NotFound() : Results.Json(path, _jsonOptions);
+        });
         app.MapGet("/api/analytics/poc-ts/heatmap", (string? version, string? map, int? grid, PocTsAnalytics analytics) =>
             Results.Json(analytics.Heatmap(version, map, Math.Clamp(grid ?? 64, 8, 200)), _jsonOptions));
 

@@ -27,8 +27,8 @@ public sealed class SessionDigest
     public List<PathPoint> Path { get; set; } = new();
 }
 
-/// <summary>플레이어 위치 한 점(월드 X·Z).</summary>
-public readonly record struct PathPoint(float X, float Z);
+/// <summary>플레이어 위치 한 점(게임 시간 T초, 월드 X·Z).</summary>
+public readonly record struct PathPoint(float T, float X, float Z);
 
 /// <summary>웨이브 한 번의 마감 요약(summaryId당 최고 revision 하나).</summary>
 public sealed record WaveDigest(int Wave, string Status, string Reason, int Kills, double? ClearSeconds);
@@ -189,7 +189,7 @@ public static class TelemetryReader
                     double? z = Num(player, "z");
                     if (x is double px && z is double pz && lastElapsed - lastPathSample >= PATH_SAMPLE_SECONDS)
                     {
-                        digest.Path.Add(new PathPoint((float)px, (float)pz));
+                        digest.Path.Add(new PathPoint((float)lastElapsed, (float)px, (float)pz));
                         lastPathSample = lastElapsed;
                     }
 
