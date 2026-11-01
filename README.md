@@ -26,7 +26,7 @@ git submodule update --init --recursive
 3. `SampleAnalytics.cs`를 참고해 게임 분석 클래스를 추가한다. 세션 요약만으로 충분하면 `SessionSummary`의 행을 쓰고, 세부 로그가 필요하면 `CsvSessionStore.ReadSessionEntries`로 통합 CSV를 읽는다.
 4. 게임 규약 파일(이벤트 이름, 스테이지 목록 등)이 필요하면 `GameConfig/` 폴더에 JSON을 두고 csproj에 `CopyToOutputDirectory`를 건다.
 5. `Program.cs`에 게임별 엔드포인트를 등록한다. 그 API는 `ApiKeyAuth`가 `/api` 아래에서 인증한다.
-6. `appsettings.json`에서 `Urls`, `DataPath`, `IngestUrl`, `IngestApiKey`를 맞춘다.
+6. `appsettings.json`에서 `Urls`, `DataPath`, `IngestUrl`, `IngestApiKey`, `Project`를 맞춘다.
 
 ## 설정
 
@@ -35,7 +35,9 @@ git submodule update --init --recursive
 | Urls | `http://0.0.0.0:5001` | 대기 주소 |
 | ApiKey | `dev-log-key` | 분석 API가 요구하는 키 |
 | IngestUrl | `http://localhost:5000` | 세션을 복사해 올 수신 서버 주소 |
-| IngestApiKey | `dev-log-key` | 수신 서버의 `ApiKey`와 같아야 한다 |
+| IngestApiKey | `dev-log-key` | 수신 서버의 열람 키(`ReadApiKey`)와 맞춘다. 읽기만 하므로 열람 키면 충분하다 |
+| Project | (비움) | 이 분석 서버가 맡는 프로젝트. 수신 서버 `Projects`의 이름과 같아야 한다 |
+| GmToolUrl | `http://localhost:5000/dashboard` | 페이지 머리글의 GM 툴 링크 주소 |
 | SyncIntervalSeconds | 60 | 수신 서버 세션 목록을 다시 확인하는 간격 |
 | IngestTimeoutSeconds | 120 | 수신 서버 요청 한 번의 제한 시간 |
 | DataPath | `data` | 미러 저장소. 이 서버만 쓴다. 수신 서버의 `data`와 같은 폴더로 두지 않는다 |
