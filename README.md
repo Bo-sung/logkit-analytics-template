@@ -9,15 +9,15 @@ LogKit 수신 서버(공통)에서 세션 로그를 주기적으로 복사해 �
 - `IngestMirror.cs`: 수신 서버 내보내기 API(`/api/export/*`)를 주기적으로 읽어 세션을 미러로 복사한다. 게임과 무관하다.
 - `AnalyticsOptions.cs`: 설정(수신 서버 주소·키, 동기화 간격, 미러 경로).
 - `SampleAnalytics.cs`: 예제 분석기. 세션 요약 행만으로 앱 버전별 통계를 계산한다.
-- `core/`: 공용 코어(LogKit Core) 서브모듈. 세션 저장 형식, CSV 파서, 요약, 인증 미들웨어를 담는다.
+- `core/`: 공용 코어(LogKit Core)를 직접 포함한 폴더. 세션 저장 형식, CSV 파서, 요약, 인증 미들웨어를 담는다. 원본은 LogKit 저장소의 `server/core`이며, 바뀌면 이 폴더를 같은 내용으로 맞춘다.
 
 ## 저장소 받기
 
 ```bash
-git clone --recurse-submodules <이 저장소 URL>
-# 이미 받은 경우
-git submodule update --init --recursive
+git clone <이 저장소 URL>
 ```
+
+코어가 포함되어 있어서 서브모듈을 받을 필요가 없습니다.
 
 ## 새 게임 분석기 만들기
 
