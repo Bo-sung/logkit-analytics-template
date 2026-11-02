@@ -36,6 +36,8 @@ public static class Program
         WebApplication app = builder.Build();
 
         app.UseMiddleware<ApiKeyAuth>(new ApiKeys(options.ApiKey));
+        app.MapGet("/", () => Results.Redirect("/analytics"));
+        app.MapGet("/analytics", () => Results.Content(AnalyticsPage.Html.Replace("__GM_TOOL_URL__", options.GmToolUrl, StringComparison.Ordinal), "text/html; charset=utf-8"));
         app.MapGet("/health", () => Results.Text("ok", "text/plain"));
         app.MapGet("/api/mirror/status", (IngestMirror mirror) => Results.Json(mirror.Status, _jsonOptions));
         app.MapGet("/api/months", (SessionSummary summary) => Results.Json(new { months = summary.ListMonths() }, _jsonOptions));
